@@ -1,25 +1,60 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Camera, X, Upload, MapPin, Clock, CheckCircle2 } from "lucide-react";
+import { Camera, X, Upload, MapPin, Clock, CheckCircle2, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
 
 interface AttendanceMarkerProps {
   onClose: () => void;
   userName: string;
+  userId: string;
 }
 
-const AttendanceMarker = ({ onClose, userName }: AttendanceMarkerProps) => {
+const AttendanceMarker = ({ onClose, userName, userId }: AttendanceMarkerProps) => {
   const [image, setImage] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [location, setLocation] = useState<string>("Fetching location...");
+  const [coordinates, setCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  useEffect(() => {
+    // Get user's location
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const { latitude, longitude } = position.coords;
+          setCoordinates({ lat: latitude, lng: longitude });
+          
+          // Reverse geocode to get location name
+          try {
+            const response = await fetch(
+              `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`
+            );
+            const data = await response.json();
+            setLocation(data.display_name || `${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+          } catch (error) {
+            setLocation(`${latitude.toFixed(4)}, ${longitude.toFixed(4)}`);
+          }
+        },
+        (error) => {
+          console.error("Location error:", error);
+          setLocation("Location unavailable");
+        }
+      );
+    } else {
+      setLocation("Location not supported");
+    }
+  }, []);
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      setImageFile(file);
       const reader = new FileReader();
       reader.onloadend = () => {
         setImage(reader.result as string);
@@ -29,7 +64,7 @@ const AttendanceMarker = ({ onClose, userName }: AttendanceMarkerProps) => {
   };
 
   const handleSubmit = async () => {
-    if (!image) {
+    if (!imageFile) {
       toast({
         title: "Photo required",
         description: "Please upload a photo to mark attendance",
@@ -40,28 +75,54 @@ const AttendanceMarker = ({ onClose, userName }: AttendanceMarkerProps) => {
 
     setIsSubmitting(true);
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
+    try {
+      // Upload photo to Supabase Storage
+      const fileName = `${userId}_${Date.now()}.jpg`;
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('attendance-photos')
+        .upload(fileName, imageFile, {
+          contentType: imageFile.type,
+          upsert: false,
+        });
 
-    // In production, this would save to Google Sheets via Apps Script
-    const attendanceData = {
-      user: userName,
-      timestamp: new Date().toISOString(),
-      image: image,
-      location: "Kakinada Office", // Would use geolocation in production
-    };
+      if (uploadError) throw uploadError;
 
-    console.log("Attendance marked:", attendanceData);
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('attendance-photos')
+        .getPublicUrl(fileName);
 
-    setIsSuccess(true);
-    toast({
-      title: "Attendance marked!",
-      description: "Your check-in has been recorded successfully",
-    });
+      // Save attendance record to database
+      const { error: insertError } = await supabase
+        .from('attendance')
+        .insert({
+          user_id: userId,
+          photo_url: publicUrl,
+          location: location,
+          timestamp_utc: new Date().toISOString(),
+          method: 'web',
+        });
 
-    setTimeout(() => {
-      onClose();
-    }, 2000);
+      if (insertError) throw insertError;
+
+      setIsSuccess(true);
+      toast({
+        title: "Attendance marked!",
+        description: "Your check-in has been recorded successfully",
+      });
+
+      setTimeout(() => {
+        onClose();
+      }, 2000);
+    } catch (error: any) {
+      console.error('Error marking attendance:', error);
+      toast({
+        title: "Error",
+        description: error.message || "Failed to mark attendance. Please try again.",
+        variant: "destructive",
+      });
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -89,9 +150,14 @@ const AttendanceMarker = ({ onClose, userName }: AttendanceMarkerProps) => {
                   <Clock className="w-4 h-4 text-gold" />
                   <span>{new Date().toLocaleString()}</span>
                 </div>
-                <div className="flex items-center gap-3 text-sm text-muted-foreground">
-                  <MapPin className="w-4 h-4 text-gold" />
-                  <span>Kakinada Office</span>
+                <div className="flex items-center gap-3 text-sm">
+                  <MapPin className="w-4 h-4 text-gold flex-shrink-0" />
+                  <span className={location === "Fetching location..." ? "text-muted-foreground" : "text-foreground"}>
+                    {location === "Fetching location..." && (
+                      <Loader2 className="w-3 h-3 animate-spin inline mr-2" />
+                    )}
+                    {location}
+                  </span>
                 </div>
               </div>
 

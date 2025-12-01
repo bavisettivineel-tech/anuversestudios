@@ -15,7 +15,7 @@ interface Task {
 }
 
 interface TaskListProps {
-  userRole: "marketing_manager" | "coder";
+  userRole: "marketing_manager" | "coder" | "admin";
 }
 
 const marketingTasks: Task[] = [

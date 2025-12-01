@@ -16,41 +16,36 @@ import {
   Code2,
   GitBranch,
   Upload,
+  Loader2,
 } from "lucide-react";
 import AttendanceMarker from "@/components/AttendanceMarker";
 import TaskList from "@/components/TaskList";
 import LeadForm from "@/components/LeadForm";
-
-interface User {
-  email: string;
-  name: string;
-  role: "marketing_manager" | "coder";
-  authenticated: boolean;
-}
+import { useAuth } from "@/hooks/useAuth";
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState<User | null>(null);
+  const { user, profile, loading, signOut } = useAuth();
   const [showAttendance, setShowAttendance] = useState(false);
   const [showLeadForm, setShowLeadForm] = useState(false);
 
   useEffect(() => {
-    const userData = localStorage.getItem("user");
-    if (!userData) {
+    if (!loading && !user) {
       navigate("/auth");
-      return;
     }
-    setUser(JSON.parse(userData));
-  }, [navigate]);
+  }, [user, loading, navigate]);
 
-  const handleLogout = () => {
-    localStorage.removeItem("user");
-    navigate("/auth");
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-background via-background to-card flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-gold" />
+      </div>
+    );
+  }
 
-  if (!user) return null;
+  if (!user || !profile) return null;
 
-  const isMarketing = user.role === "marketing_manager";
+  const isMarketing = profile.role === "marketing_manager";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-card">
@@ -71,10 +66,10 @@ const Dashboard = () => {
             </div>
             <div className="flex items-center gap-3">
               <div className="text-right mr-3 hidden sm:block">
-                <p className="text-sm font-medium text-foreground">{user.name}</p>
+                <p className="text-sm font-medium text-foreground">{profile.name}</p>
                 <p className="text-xs text-muted-foreground">{user.email}</p>
               </div>
-              <Button variant="ghost" size="icon" onClick={handleLogout}>
+              <Button variant="ghost" size="icon" onClick={signOut}>
                 <LogOut className="w-5 h-5" />
               </Button>
             </div>
@@ -190,13 +185,17 @@ const Dashboard = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5 }}
         >
-          <TaskList userRole={user.role} />
+          <TaskList userRole={profile.role || 'coder'} />
         </motion.div>
       </main>
 
       {/* Modals */}
       {showAttendance && (
-        <AttendanceMarker onClose={() => setShowAttendance(false)} userName={user.name} />
+        <AttendanceMarker 
+          onClose={() => setShowAttendance(false)} 
+          userName={profile.name}
+          userId={user.id}
+        />
       )}
       {showLeadForm && <LeadForm onClose={() => setShowLeadForm(false)} />}
     </div>
