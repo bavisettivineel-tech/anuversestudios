@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { Button } from "@/components/ui/button";
@@ -6,39 +6,133 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
-import { Sparkles, LogIn, UserPlus, Briefcase, Code } from "lucide-react";
+import { Sparkles, LogIn, UserPlus, Briefcase, Code, Loader2 } from "lucide-react";
+import { supabase } from "@/integrations/supabase/client";
+import type { Database } from "@/integrations/supabase/types";
 
-type UserRole = "marketing_manager" | "coder";
+type AppRole = Database["public"]["Enums"]["app_role"];
 
 const Auth = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [role, setRole] = useState<UserRole>("marketing_manager");
+  const [role, setRole] = useState<AppRole>("marketing_manager");
+  const [loading, setLoading] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
   const navigate = useNavigate();
   const { toast } = useToast();
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    
-    // Store user data in localStorage (in production, this would be proper authentication)
-    const userData = {
-      email,
-      name: isLogin ? email.split("@")[0] : name,
-      role,
-      authenticated: true,
-    };
-    
-    localStorage.setItem("user", JSON.stringify(userData));
-    
-    toast({
-      title: isLogin ? "Welcome back!" : "Account created!",
-      description: `Logged in as ${role === "marketing_manager" ? "Marketing Manager" : "Coder"}`,
+  useEffect(() => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
+      if (session) {
+        navigate("/dashboard");
+      }
+      setCheckingSession(false);
     });
-    
-    navigate("/dashboard");
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        navigate("/dashboard");
+      }
+      setCheckingSession(false);
+    });
+
+    return () => subscription.unsubscribe();
+  }, [navigate]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    try {
+      if (isLogin) {
+        const { error } = await supabase.auth.signInWithPassword({
+          email,
+          password,
+        });
+
+        if (error) throw error;
+
+        toast({
+          title: "Welcome back!",
+          description: "You have been signed in successfully.",
+        });
+      } else {
+        const redirectUrl = `${window.location.origin}/dashboard`;
+        
+        const { data, error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            emailRedirectTo: redirectUrl,
+            data: {
+              name,
+              role,
+            },
+          },
+        });
+
+        if (error) throw error;
+
+        if (data.user) {
+          // Create profile
+          const { error: profileError } = await supabase
+            .from("profiles")
+            .insert({
+              user_id: data.user.id,
+              name,
+            });
+
+          if (profileError && !profileError.message.includes("duplicate")) {
+            console.error("Profile creation error:", profileError);
+          }
+
+          // Assign role
+          const { error: roleError } = await supabase
+            .from("user_roles")
+            .insert({
+              user_id: data.user.id,
+              role,
+            });
+
+          if (roleError && !roleError.message.includes("duplicate")) {
+            console.error("Role assignment error:", roleError);
+          }
+
+          toast({
+            title: "Account created!",
+            description: `Welcome to Anuverse Studios as ${role === "marketing_manager" ? "Marketing Manager" : role === "admin" ? "Admin" : "Coder"}`,
+          });
+        }
+      }
+    } catch (error: any) {
+      console.error("Auth error:", error);
+      let message = error.message;
+      
+      if (error.message.includes("User already registered")) {
+        message = "This email is already registered. Please sign in instead.";
+      } else if (error.message.includes("Invalid login credentials")) {
+        message = "Invalid email or password. Please try again.";
+      }
+
+      toast({
+        title: "Error",
+        description: message,
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
+    }
   };
+
+  if (checkingSession) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <Loader2 className="w-8 h-8 animate-spin text-gold" />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-card flex items-center justify-center p-4 relative overflow-hidden">
@@ -108,6 +202,7 @@ const Auth = () => {
               size="sm"
               onClick={() => setIsLogin(true)}
               className="flex-1"
+              disabled={loading}
             >
               <LogIn className="w-4 h-4 mr-2" />
               Login
@@ -117,6 +212,7 @@ const Auth = () => {
               size="sm"
               onClick={() => setIsLogin(false)}
               className="flex-1"
+              disabled={loading}
             >
               <UserPlus className="w-4 h-4 mr-2" />
               Register
@@ -134,6 +230,7 @@ const Auth = () => {
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   required
+                  disabled={loading}
                   className="bg-background/50 border-border"
                 />
               </div>
@@ -148,6 +245,7 @@ const Auth = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
+                disabled={loading}
                 className="bg-background/50 border-border"
               />
             </div>
@@ -161,6 +259,8 @@ const Auth = () => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
+                disabled={loading}
+                minLength={6}
                 className="bg-background/50 border-border"
               />
             </div>
@@ -172,6 +272,7 @@ const Auth = () => {
                   <button
                     type="button"
                     onClick={() => setRole("marketing_manager")}
+                    disabled={loading}
                     className={`p-4 rounded-lg border-2 transition-all ${
                       role === "marketing_manager"
                         ? "border-gold bg-gold/10 shadow-[var(--shadow-gold)]"
@@ -184,6 +285,7 @@ const Auth = () => {
                   <button
                     type="button"
                     onClick={() => setRole("coder")}
+                    disabled={loading}
                     className={`p-4 rounded-lg border-2 transition-all ${
                       role === "coder"
                         ? "border-gold bg-gold/10 shadow-[var(--shadow-gold)]"
@@ -197,8 +299,15 @@ const Auth = () => {
               </div>
             )}
 
-            <Button type="submit" variant="hero" size="lg" className="w-full mt-6">
-              {isLogin ? "Sign In" : "Create Account"}
+            <Button type="submit" variant="hero" size="lg" className="w-full mt-6" disabled={loading}>
+              {loading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  {isLogin ? "Signing In..." : "Creating Account..."}
+                </>
+              ) : (
+                isLogin ? "Sign In" : "Create Account"
+              )}
             </Button>
           </form>
         </Card>

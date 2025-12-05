@@ -17,6 +17,7 @@ import {
   GitBranch,
   Upload,
   Loader2,
+  Shield,
 } from "lucide-react";
 import AttendanceMarker from "@/components/AttendanceMarker";
 import TaskList from "@/components/TaskList";
@@ -46,6 +47,7 @@ const Dashboard = () => {
   if (!user || !profile) return null;
 
   const isMarketing = profile.role === "marketing_manager";
+  const isAdmin = profile.role === "admin";
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-background to-card">
@@ -69,6 +71,17 @@ const Dashboard = () => {
                 <p className="text-sm font-medium text-foreground">{profile.name}</p>
                 <p className="text-xs text-muted-foreground">{user.email}</p>
               </div>
+              {isAdmin && (
+                <Button 
+                  variant="gold" 
+                  size="sm" 
+                  onClick={() => navigate("/admin")}
+                  className="hidden sm:flex"
+                >
+                  <Shield className="w-4 h-4 mr-2" />
+                  Admin
+                </Button>
+              )}
               <Button variant="ghost" size="icon" onClick={signOut}>
                 <LogOut className="w-5 h-5" />
               </Button>
